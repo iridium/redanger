@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiptop Dev Key Signer</title>
+<style>
+  html { color-scheme: dark; }
+  body { font-family: sans-serif; max-width: 640px; margin: 2em auto; padding: 0 1em; line-height: 1.5;
+         background: #111; color: #ddd; }
+  a { color: #8ab4f8; }
+  header { text-align: center; }
+  .logo { height: 60px; filter: brightness(1.8); }
+  label { display: block; margin-top: 1em; font-weight: bold; }
+  input, textarea, select { width: 100%; box-sizing: border-box; font-family: monospace; padding: 0.4em; }
+  input, textarea, select, button { background: #222; color: #ddd; border: 1px solid #444; }
+  textarea { height: 5em; }
+  button { margin-top: 1em; padding: 0.5em 1em; cursor: pointer; }
+  .ok { color: #6c6; }
+  .bad { color: #f66; }
+</style>
+</head>
+<body>
+<header>
+<a href="https://github.com/iridium/redanger"><img class="logo" src="screenshots/logo.svg" alt="Re:Danger"></a>
+<h1>Hiptop Dev Key Signer</h1>
+</header>
+<p>Makes a signed developer key for a Danger Hiptop. Everything runs in this page.
+See the <a href="https://github.com/iridium/redanger#developer-mode">README</a> for how to install it.
+Part of <a href="https://github.com/iridium/redanger">Re:Danger</a>.</p>
+
+<label for="factors">Developer Program key factors (p and q, prefilled with the Danger Developer Program key)</label>
+<textarea id="factors" spellcheck="false">104491666572898294264047880744514595625924491114579942567545554396922436316211
+110787645499676419929932206845243986470558771418524609420578927381066743957279</textarea>
+
+<label for="kind">Device</label>
+<select id="kind">
+  <option value="sq">Hiptop 1 / Hiptop 2 (devos_key_IMEI.sq, flash from htconsole)</option>
+  <option value="jar">Hiptop 3 (devkey_IMEI.jar, flash from recovery)</option>
+  <option value="undo">Hiptop 3: remove the developer key (devkey_undo.jar, flash from recovery)</option>
+</select>
+
+<label for="imei">IMEI (15 digits)</label>
+<input id="imei" type="text" inputmode="numeric" maxlength="15" spellcheck="false">
+
+<label for="dispatcher">Dispatcher host (optional)</label>
+<input id="dispatcher" type="text" spellcheck="false" placeholder="leave empty to keep the default">
+
+<button id="build">Build and download</button>
+<p id="status"></p>
+
+<script>
+"use strict";
+// issuerAndSerialNumber of the "Danger Developer Program" cert, from Danger's null-device-key.sq.
+const hex = s => Uint8Array.fromHex(s);
+const ISSUER_SERIAL = hex("3081b73081a2310b3009060355040613025553311330110603550408130a43616c69666f726e6961311230100603550407130950616c6f20416c746f310f300d060355040a130644616e67657231123010060355040b1309446576656c6f7065723121301f0603550403131844616e67657220446576656c6f7065722050726f6772616d3122302006092a864886f70d0109011313737765746c616e644064616e6765722e636f6d02105f85f0390ae5fc8747b03568393b4034");
+// The "Danger Developer Program" certificate itself. Hiptop 3 recovery jars embed it.
+const DEV_CERT = hex("3082038730820331a00302010202105f85f0390ae5fc8747b03568393b4034300d06092a864886f70d01010405003081a2310b3009060355040613025553311330110603550408130a43616c69666f726e6961311230100603550407130950616c6f20416c746f310f300d060355040a130644616e67657231123010060355040b1309446576656c6f7065723121301f0603550403131844616e67657220446576656c6f7065722050726f6772616d3122302006092a864886f70d0109011613737765746c616e644064616e6765722e636f6d301e170d3033303931373231353030355a170d3036303431313037303030305a3081a2310b3009060355040613025553311330110603550408130a43616c69666f726e6961311230100603550407130950616c6f20416c746f310f300d060355040a130644616e67657231123010060355040b1309446576656c6f7065723121301f0603550403131844616e67657220446576656c6f7065722050726f6772616d3122302006092a864886f70d0109011613737765746c616e644064616e6765722e636f6d305c300d06092a864886f70d0101010500034b003048024100dd0831d698324c0bf9024b56cbfb8f06debdbee65db2db3bd07f6dddb343e5cf0a7d042fd2664d6459a3162caa7317b0893acbd585fd43508e81601ed086bf2d0203010001a382013f3082013b300d0603551d0a04063004030206403039060355040304321e3000440061006e00670065007200200044006500760065006c006f007000650072002000500072006f006700720061006d30150603551d25040e300c060a2b06010401fe2c0101043081d70603551d010481cf3081cc8010b6f4e7e37acd7d4ef05a3d3b74c5a044a181a53081a2310b3009060355040613025553311330110603550408130a43616c69666f726e6961311230100603550407130950616c6f20416c746f310f300d060355040a130644616e67657231123010060355040b1309446576656c6f7065723121301f0603550403131844616e67657220446576656c6f7065722050726f6772616d3122302006092a864886f70d0109011613737765746c616e644064616e6765722e636f6d82105f85f0390ae5fc8747b03568393b4034300d06092a864886f70d0101040500034100a34ee00da92244a05aaecfe1f1d007e3ea3423a03ef7f40a80fbe6122497b1b65e872efaff8c812025bacbc8d815c3d738cde0c6ab96752533c68e9adf9d1fb8");
+const E = 65537n;
+
+function cat(...parts) { const o = new Uint8Array(parts.reduce((a, p) => a + p.length, 0)); let i = 0; for (const p of parts) { o.set(p, i); i += p.length; } return o; }
+function ascii(s) { return new TextEncoder().encode(s); }
+function u32le(v) { return new Uint8Array([v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]); }
+function pad4(b) { return b.length % 4 ? cat(b, new Uint8Array(4 - b.length % 4)) : b; }
+function bigToBytes(x, len) { return Uint8Array.fromHex(x.toString(16).padStart(len * 2, "0")); }
+function bytesToBig(b) { return BigInt("0x" + b.toHex()); }
+
+async function sha1(b) { return new Uint8Array(await crypto.subtle.digest("SHA-1", b)); }
+function adler32(b) { let a = 1, s = 0; for (const v of b) { a = (a + v) % 65521; s = (s + a) % 65521; } return ((s << 16) | a) >>> 0; }
+function modpow(b, e, m) { let r = 1n; b %= m; while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; } return r; }
+function modinv(a, m) { let [g, x, ng, nx] = [m, 0n, a % m, 1n]; while (ng) { const q = g / ng; [g, ng] = [ng, g - q * ng]; [x, nx] = [nx, x - q * nx]; } return ((x % m) + m) % m; }
+
+// DER encoding.
+function der(tag, body) {
+  const n = body.length;
+  return cat(new Uint8Array([tag, ...(n < 0x80 ? [n] : n < 0x100 ? [0x81, n] : [0x82, n >> 8, n & 255])]), body);
+}
+const NONE = new Uint8Array();
+const SHA1_ALG = der(0x30, cat(der(0x06, hex("2b0e03021a")), der(0x05, NONE)));
+const RSA_ALG = der(0x30, cat(der(0x06, hex("2a864886f70d010101")), der(0x05, NONE)));
+const DANGER_CT = der(0x06, hex("2a06010401fe2c010201"));   // 1.2.6.1.4.1.16172.1.2.1, malformed exactly as Danger wrote it
+
+// Config payload: "IPC1", then items of [type][size u24][name\0][value], ended by 0.
+function ipc1(items) {
+  const parts = [ascii("IPC1")];
+  for (const [name, value, type] of items) {
+    const body = cat(ascii(name), new Uint8Array([0]), type === 1 ? u32le(value) : ascii(value));
+    parts.push(new Uint8Array([type, body.length & 255, (body.length >> 8) & 255, body.length >> 16]), body);
+  }
+  return cat(...parts, new Uint8Array([0]));
+}
+
+// Authenticode style CMS SignedData over a SHA-1 content digest, as Danger's signing tool wrote it.
+// Dev keys (.sq) carry no certificate; recovery jars embed the signer certificate.
+async function signedData(contentDigest, certs, n, d) {
+  const eValue = cat(SHA1_ALG, der(0x04, contentDigest));
+  const attrs = cat(
+    der(0x30, cat(der(0x06, hex("2b06010401823702010c")), der(0x31, der(0x30, NONE)))),
+    der(0x30, cat(der(0x06, hex("2a864886f70d010903")), der(0x31, DANGER_CT))),
+    der(0x30, cat(der(0x06, hex("2b06010401823702010b")), der(0x31, der(0x30, der(0x06, hex("2b060104018237020116")))))),
+    der(0x30, cat(der(0x06, hex("2a864886f70d010904")), der(0x31, der(0x04, await sha1(eValue))))));
+  const k = Math.ceil(n.toString(2).length / 8);
+  const t = der(0x30, cat(SHA1_ALG, der(0x04, await sha1(der(0x31, attrs)))));
+  const em = cat(new Uint8Array([0, 1]), new Uint8Array(k - t.length - 3).fill(0xff), new Uint8Array([0]), t);
+  const sig = bigToBytes(modpow(bytesToBig(em), d, n), k);
+  const signerInfo = der(0x30, cat(der(0x02, new Uint8Array([1])), ISSUER_SERIAL, SHA1_ALG, der(0xa0, attrs), RSA_ALG, der(0x04, sig)));
+  const blk = der(0x30, cat(der(0x02, new Uint8Array([1])), der(0x31, SHA1_ALG),
+    der(0x30, cat(DANGER_CT, der(0xa0, der(0x30, eValue)))), der(0xa0, certs), der(0x31, signerInfo)));
+  // Check the signature with the public key before handing the file out.
+  return { blk, ok: modpow(bytesToBig(sig), E, n) === bytesToBig(em) };
+}
+
+// Hiptop 1/2: GORD file with header, AD32 checksum, FILE chunk (type 6 config) and SIGN chunk.
+async function buildSq(payload, n, d) {
+  const fileBody = cat(u32le(6), payload);
+  const chunk = pad4(cat(ascii("FILE"), u32le(fileBody.length), fileBody));
+  const { blk, ok } = await signedData(await sha1(chunk), NONE, n, d);
+  const tail = cat(chunk, pad4(cat(ascii("SIGN"), u32le(blk.length), blk)));
+  const file = cat(ascii("GORD"), u32le(tail.length), u32le(0), u32le(0x18), ascii("AD32"), u32le(adler32(tail)), tail);
+  return { file, ok };
+}
+
+// Hiptop 3: recovery jar whose INSTALL script copies the config into /flash/config/system-overrides.ipc.
+function crc32(b) { let c = ~0; for (const v of b) { c ^= v; for (let i = 0; i < 8; i++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c >>> 0; }
+function u16le(v) { return new Uint8Array([v & 255, (v >> 8) & 255]); }
+function zip(files) {  // stored (uncompressed) zip
+  const local = [], central = [];
+  let offset = 0;
+  for (const [name, data] of files) {
+    const n = ascii(name), crc = crc32(data);
+    const common = cat(u16le(20), u16le(0), u16le(0), u16le(0), u16le(0x21), u32le(crc), u32le(data.length), u32le(data.length), u16le(n.length), u16le(0));
+    local.push(cat(u32le(0x04034b50), common, n, data));
+    central.push(cat(u32le(0x02014b50), u16le(20), common, u16le(0), u16le(0), u16le(0), u32le(0), u32le(offset), n));
+    offset += local.at(-1).length;
+  }
+  const cd = cat(...central);
+  return cat(...local, cd, u32le(0x06054b50), u16le(0), u16le(0), u16le(files.length), u16le(files.length), u32le(cd.length), u32le(offset), u16le(0));
+}
+async function buildJar(payload, n, d) {
+  const install = ascii('copy "config/system-overrides.ipc" "config/system-overrides.ipc";\n');
+  const b64 = async b => btoa(String.fromCharCode(...await sha1(b)));
+  const manifest = ascii("Manifest-Version: 1.0\r\nDanger-Install: META-INF/INSTALL\r\nCreated-By: 1.5.0_10(Sun Microsystems Inc.)\r\n\r\n" +
+    "Name: config/system-overrides.ipc\r\nSHA1-Digest: " + await b64(payload) + "\r\n\r\n" +
+    "Name: META-INF/INSTALL\r\nSHA1-Digest: " + await b64(install) + "\r\n\r\n");
+  const { blk, ok } = await signedData(await sha1(manifest), DEV_CERT, n, d);
+  const file = zip([["META-INF/MANIFEST.MF", manifest], ["config/system-overrides.ipc", payload],
+                    ["META-INF/INSTALL", install], ["META-INF/SIGNATURE.BLK", blk]]);
+  return { file, ok };
+}
+
+function status(cls, text) { const el = document.getElementById("status"); el.className = cls; el.textContent = text; }
+
+document.getElementById("build").onclick = async () => {
+  const nums = (document.getElementById("factors").value.match(/\d{20,}/g) || []).map(BigInt);
+  const imei = document.getElementById("imei").value.trim();
+  const dispatcher = document.getElementById("dispatcher").value.trim();
+  if (nums.length < 2) return status("bad", "Paste the two prime factors.");
+  const kind = document.getElementById("kind").value;
+  if (kind !== "undo" && !/^\d{15}$/.test(imei)) return status("bad", "The IMEI must be 15 digits.");
+  const [p, q] = nums;
+  const n = p * q, d = modinv(E, (p - 1n) * (q - 1n));
+  // An override without lock_to_imei_0 is invalid, so the OS deletes it on the next boot.
+  const items = kind === "sq" ? [["lock_to_imei_0", imei, 2]]
+              : kind === "jar" ? [["has_config_overrides", "1", 2], ["lock_to_imei_0", imei, 2]]
+              : [["has_config_overrides", "1", 2]];
+  if (dispatcher && kind !== "undo") items.push(["dispatcher", dispatcher, 2]);
+  const { file, ok } = await (kind === "sq" ? buildSq : buildJar)(ipc1(items), n, d);
+  if (!ok) return status("bad", "Signature check failed. Not saving the file.");
+  const name = kind === "sq" ? "devos_key_" + imei + ".sq" : kind === "jar" ? "devkey_" + imei + ".jar" : "devkey_undo.jar";
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([file])), download: name });
+  a.click();
+  status("ok", "Saved " + name + " (" + file.length + " bytes, sha1 " + (await sha1(file)).toHex() + ")");
+};
+</script>
+</body>
+</html>
