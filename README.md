@@ -3,22 +3,23 @@
    <img src="screenshots/aim.png" alt="AIM Screenshot" />
 </p>
 
-*Re:Danger* is a revival project for Danger Hiptop and T-Mobile Sidekick devices. Since the original DangerOS servers were shut down over 15 years ago, these devices have been unable to get past the login screen. This is a clean-room reimplementation of that backend.
+*Re:Danger* is a revival project for Danger Hiptop and T-Mobile Sidekick devices. Since the original DangerOS servers were shut down over 15 years ago, these devices have been unable to get past the login screen. This is a reimplementation of that backend, rebuilt by reverse engineering the device software.
 
 ## Features
 
 - [x] Server time sync
 - [x] Discord bridge (Discord channels appear as AIM chat rooms with real-time two-way messaging)
-- [x] Web browser (Kimba). Kind of works but very broken. Based on Chrome.
+- [x] Web browser (Kimba). Kind of works but very broken. Server-side HTML/CSS engine in Go (no JavaScript).
 - [ ] Email support
 - [ ] OSCAR support to connect to AIM servers
 - [ ] Download Catalog
 - [ ] Photo Album Sync
 - [x] Development key generator for real devices (see [Developer mode](#developer-mode))
+- [x] Hiptop simulator in the browser, with Class of '09 preinstalled (see [Simulator](#simulator))
 
 ## Setup
 
-Requires Go 1.25+.
+Requires Go 1.27.3+.
 
 ```
 cd server
@@ -34,6 +35,12 @@ go run .
 | `DISCORD_GUILD_ID` | The Discord server (guild) whose text channels are exposed as chat rooms. |
 
 ### Simulator
+
+#### Web
+
+Try it at [redanger.x86.cx](https://redanger.x86.cx/). See [`websim/`](websim/).
+
+#### Local
 
 You'll need a copy of the [Hiptop SDK](https://archive.org/details/hiptop_sdk).
 
@@ -119,6 +126,14 @@ This is Danger's original procedure, which we have not tested ourselves. With ht
 - **Hiptop 1 / 2 key (`.sq`):** a `GORD` file with an Adler-32 checksum, a `FILE` chunk holding an `IPC1` config message (`lock_to_imei_0 = IMEI`), and a `SIGN` chunk. The signature is a CMS SignedData in Microsoft Authenticode style, including Danger's malformed content-type OID `1.2.6.1.4.1.16172.1.2.1`.
 - **Hiptop 3 recovery jar:** a zip with `META-INF/MANIFEST.MF`, an `INSTALL` script and `META-INF/SIGNATURE.BLK`, the same signature format over the manifest. Recovery runs `INSTALL` (`copy "config/system-overrides.ipc" "config/system-overrides.ipc";`) with the permissions granted by the signer's certificate. The Developer Program certificate only carries "Sign Developer Configuration File" (`1.3.6.1.4.1.16172.1.1.4`), so these jars can install the developer config and nothing else.
 - **At boot** the OS merges `/flash/config/system-overrides.ipc` into the system config. If `lock_to_imei_0` matches the phone it enables developer mode; if the lock is missing it deletes the override.
+
+## Class of '09
+
+<p align="center">
+   <img src="screenshots/classof09_menu.png" alt="Class of '09 title menu" />
+</p>
+
+A port of the visual novel *Class of '09* to the Sidekick 3. It is a small Java engine that plays the game's script, art, voice acting and movies from a data pack on the miniSD card, with an Auto Play mode. No game content is in this repository: you build the pack from your own copy of the game. See [`classof09/README.md`](classof09/README.md) for building and installing it.
 
 ## Protocol
 

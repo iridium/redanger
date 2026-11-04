@@ -1,0 +1,5 @@
+# Asset converter toolchain: ffmpeg for decoding the source media, Python for the encoders.
+FROM docker.io/library/archlinux:latest
+RUN pacman -Sy --noconfirm --needed ffmpeg python python-numpy python-pillow python-scipy python-lz4 git \
+    && pacman -Scc --noconfirm
+WORKDIR /work

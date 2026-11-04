@@ -265,13 +265,11 @@ func TestContactsUpdateAllV1(t *testing.T) {
 	body := Marshal(msg)
 	r := NewBodyReader(body.Bytes())
 
-	// Command
 	cmd, _ := r.ReadInt()
 	if cmd != -1002 {
 		t.Fatalf("command = %d, want -1002", cmd)
 	}
 
-	// Categories
 	catCount, _ := r.ReadInt()
 	if catCount != 1 {
 		t.Fatalf("categories = %d, want 1", catCount)
@@ -282,7 +280,6 @@ func TestContactsUpdateAllV1(t *testing.T) {
 		t.Errorf("category = (%d, %q), want (1, Unfiled)", catID, catName)
 	}
 
-	// Labels
 	lblCount, _ := r.ReadInt()
 	if lblCount != 1 {
 		t.Fatalf("labels = %d, want 1", lblCount)
@@ -290,7 +287,6 @@ func TestContactsUpdateAllV1(t *testing.T) {
 	r.ReadInt()    // id
 	r.ReadString() // name
 
-	// IM services
 	imSvcCount, _ := r.ReadInt()
 	if imSvcCount != 1 {
 		t.Fatalf("im services = %d, want 1", imSvcCount)
@@ -298,14 +294,13 @@ func TestContactsUpdateAllV1(t *testing.T) {
 	r.ReadInt()    // id
 	r.ReadString() // name
 
-	// Contacts
 	contactCount, _ := r.ReadInt()
 	if contactCount != 1 {
 		t.Fatalf("contacts = %d, want 1", contactCount)
 	}
 
 	// Read through the contact fields to verify no stream misalignment
-	uid, _ := r.ReadInt() // uid
+	uid, _ := r.ReadInt()
 	if uid != 42 {
 		t.Errorf("uid = %d, want 42", uid)
 	}
@@ -337,13 +332,11 @@ func TestContactsUpdateAllV1(t *testing.T) {
 		t.Errorf("icon = %d, want 0", icon)
 	}
 
-	// Addresses
 	addrCount, _ := r.ReadInt()
 	if addrCount != 0 {
 		t.Errorf("addresses = %d, want 0", addrCount)
 	}
 
-	// Emails
 	emailCount, _ := r.ReadInt()
 	if emailCount != 1 {
 		t.Fatalf("emails = %d, want 1", emailCount)
@@ -355,7 +348,6 @@ func TestContactsUpdateAllV1(t *testing.T) {
 		t.Errorf("email = %q, want alice@test.com", emailAddr)
 	}
 
-	// IMs
 	imCount, _ := r.ReadInt()
 	if imCount != 1 {
 		t.Fatalf("ims = %d, want 1", imCount)
@@ -384,7 +376,6 @@ func TestContactsUpdateAllV1(t *testing.T) {
 		t.Errorf("sms ringtone = %d, want 0", smsRT)
 	}
 
-	// URLs
 	urlCount, _ := r.ReadInt()
 	if urlCount != 0 {
 		t.Errorf("urls = %d, want 0", urlCount)

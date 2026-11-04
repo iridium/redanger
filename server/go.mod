@@ -1,14 +1,15 @@
 module server
 
-go 1.25.0
+go 1.27.3
 
 tool github.com/air-verse/air
 
 require (
+	github.com/andybalholm/cascadia v1.3.5
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/go-rod/rod v0.116.2
 	github.com/joho/godotenv v1.5.1
-	golang.org/x/crypto v0.48.0
+	golang.org/x/crypto v0.51.0
+	golang.org/x/net v0.55.0
 )
 
 require (
@@ -29,13 +30,7 @@ require (
 	github.com/spf13/afero v1.14.0 // indirect
 	github.com/spf13/cast v1.9.2 // indirect
 	github.com/tdewolff/parse/v2 v2.8.3 // indirect
-	github.com/ysmood/fetchup v0.2.3 // indirect
-	github.com/ysmood/goob v0.4.0 // indirect
-	github.com/ysmood/got v0.40.0 // indirect
-	github.com/ysmood/gson v0.7.3 // indirect
-	github.com/ysmood/leakless v0.9.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 )

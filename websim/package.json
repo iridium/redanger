@@ -1,0 +1,18 @@
+{
+  "name": "redanger-websim",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hiptop (DangerOS 3.4) simulator in the browser: a small JVM in JS running the original OS bytecode",
+  "type": "module",
+  "scripts": {
+    "setup": "sh tools/setup.sh",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "boot": "node tools/boot.mjs",
+    "test": "node tools/run.mjs Hello tools/test/hello.jar"
+  },
+  "devDependencies": {
+    "vite": "6.4.5"
+  }
+}

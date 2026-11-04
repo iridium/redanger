@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hiptop Simulator</title>
+<script>
+  // ?compact (or ?compact=true): only the device, on a transparent background, sized to fill
+  // the window. For embedding in an <iframe>. Set before first paint so nothing flashes.
+  { const c = new URLSearchParams(location.search).get("compact");
+    if (c !== null && !/^(0|false|no)$/i.test(c)) document.documentElement.classList.add("compact"); }
+</script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ecebe7; --fg: #1d1d1b; --muted: #6c6a64; --panel: #f7f6f3; --line: #d6d4ce;
+    --accent: #0046a5; /* the Re:Danger logo's blue */
+    --hot: rgba(0, 70, 165, .28); --hot-ring: rgba(0, 70, 165, .75);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { color-scheme: dark; --bg: #151618; --fg: #e6e4df; --muted: #8d8b85; --panel: #1d1f22; --line: #2e3034;
+      --accent: #5b8fd9; --hot: rgba(91, 143, 217, .3); --hot-ring: rgba(91, 143, 217, .8); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  /* bracketed text links, like x86.cx's nav: [ reset ] [ simulator ] */
+  .bracket { font-family: monospace; font-size: 14px; color: var(--fg); white-space: nowrap; }
+  .bracket a, .bracket button {
+    font: inherit; color: var(--muted); text-decoration: none; margin: 0 .25rem;
+    background: none; border: 0; padding: 0; cursor: pointer;
+  }
+  .bracket a:hover, .bracket button:hover { color: var(--fg); text-decoration: underline; }
+  label.check { display: inline-flex; gap: 5px; align-items: center; color: var(--muted); }
+  #volume { width: 90px; margin: 0; accent-color: var(--accent); }
+  .size { display: inline-flex; gap: 10px; align-items: center; }
+
+  /* The device: a photo of a Sidekick 3 with the screen and controls laid over it.
+     All positions are in the photo's own pixels (480 x 364), converted to percentages. */
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .device, .bar, #log { width: min(calc(480px * var(--k, 1.8)), 100%); }
+  .device { position: relative; aspect-ratio: 480 / 364; user-select: none; }
+
+  /* under the device: logo and GitHub link, then the view controls */
+  .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .bar .controls { margin-left: auto; }
+  /* at the 1x size the device is a little narrower than the logo and controls; let the bar
+     overhang it slightly rather than wrap the controls under the logo */
+  @media (min-width: 640px) { :root:not(.compact) .bar { min-width: max-content; } }
+  /* the logo is one color; drawn as a mask so it can follow the theme */
+  .logo {
+    display: block; width: 96px; aspect-ratio: 503.68 / 135.65; background: var(--accent);
+    -webkit-mask: url("./src/logo.svg") center / contain no-repeat; mask: url("./src/logo.svg") center / contain no-repeat;
+  }
+  .device > img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; filter: drop-shadow(0 14px 28px rgba(0,0,0,.28)); }
+
+  /* compact: the device alone, as large as fits, with nothing behind it. color-scheme stays
+     "normal" because a scheme that differs from the embedding page makes the browser paint an
+     opaque backdrop behind the iframe. */
+  :root.compact { color-scheme: normal; }
+  .compact body { background: transparent; overflow: hidden; }
+  .compact main { display: block; max-width: none; padding: 0; }
+  /* compact keeps volume, reset and the simulator link under the device */
+  .compact #log, .compact .bar > a, .compact .size, .compact .show-toggle { display: none; }
+  .compact .stage { height: 100vh; justify-content: center; gap: 8px; }
+  .compact .device, .compact .bar { width: min(100vw, calc((100vh - 36px) * 480 / 364)); }
+  .compact .bar .controls { margin: 0 auto; flex-wrap: nowrap; gap: 8px; font-size: 12px; white-space: nowrap; }
+  .compact #volume { width: 70px; }
+  .compact .bracket { font-size: 12px; }
+  /* compact (an embed) links out to the full page */
+  :root:not(.compact) .compact-only { display: none; }
+  .compact .device > img { filter: none; }
+  /* the photo's display runs from (145.5, 28) to (347.5, 157.75); overscan slightly so none of
+     the photo's own screen pixels peek out around the canvas */
+  #screen {
+    position: absolute; left: calc(145 / 480 * 100%); top: calc(27.5 / 364 * 100%);
+    width: calc(203 / 480 * 100%); height: calc(130.75 / 364 * 100%);
+    image-rendering: pixelated; background: #000;
+  }
+  /* ?defer: sits on the dark screen until the first click; same rect as #screen */
+  .power-on {
+    position: absolute; left: calc(145 / 480 * 100%); top: calc(27.5 / 364 * 100%);
+    width: calc(203 / 480 * 100%); height: calc(130.75 / 364 * 100%); z-index: 1;
+    border: 0; padding: 0; cursor: pointer; background: #050506; color: #d9dbe0;
+    font: 600 clamp(11px, 2.4vw, 16px)/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+  }
+  /* an SVG, not the U+23FB power glyph: many phone fonts don't have it */
+  .power-on svg {
+    display: block; width: 2.2em; height: 2.2em; margin: 0 auto .45em; opacity: .85;
+    fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round;
+  }
+  .power-on:hover { color: #fff; }
+  .power-on:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .power-on[hidden] { display: none; }
+  /* compact has no console under the device, so boot messages show on the screen until the
+     first frame arrives; same rect as #screen, newest line at the bottom */
+  .device { container-type: inline-size; }
+  #bootlog {
+    position: absolute; left: calc(145 / 480 * 100%); top: calc(27.5 / 364 * 100%);
+    width: calc(203 / 480 * 100%); height: calc(130.75 / 364 * 100%); margin: 0; padding: .4em .5em;
+    display: none; flex-direction: column; justify-content: flex-end; overflow: hidden;
+    background: #000; color: #9fa3aa; font: 1.25cqw/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap; word-break: break-all; pointer-events: none;
+  }
+  .compact #bootlog:not([hidden]) { display: flex; }
+  .hot {
+    position: absolute; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hot.round { border-radius: 50%; }
+  .hot:hover, .show-hot .hot { box-shadow: 0 0 0 1.5px var(--hot-ring); }
+  .hot:active, .hot.down { background: var(--hot); }
+  .hot:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+
+  #log { height: 240px; overflow: auto; margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage">
+    <div class="device" id="device">
+      <img src="skin/sidekick.webp" alt="" width="480" height="364">
+      <canvas id="screen" width="240" height="160" aria-label="Hiptop screen"></canvas>
+      <pre id="bootlog" hidden aria-hidden="true"></pre>
+      <button id="power-on" class="power-on" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.6a8 8 0 1 0 11.4 0" /></svg>
+        Power on
+      </button>
+    </div>
+    <div class="bar">
+      <a href="https://github.com/iridium/redanger"><span class="logo" role="img" aria-label="Re:Danger"></span></a>
+      <div class="row controls">
+        <span class="size">
+        <label for="scale">Size</label>
+        <select id="scale">
+          <option value="1.2">1× screen</option>
+          <option value="1.8" selected>1.5× screen</option>
+          <option value="2.4">2× screen</option>
+        </select>
+        </span>
+        <label class="check" for="volume">Volume</label>
+        <input type="range" id="volume" min="0" max="100" value="80" aria-label="Volume">
+        <label class="check show-toggle"><input type="checkbox" id="showhot"> Show buttons</label>
+        <span class="bracket">[<button id="reset" title="Erase saved settings and datastores, then reload">reset</button>]</span>
+        <span class="bracket compact-only">[<a href="./" target="_blank" rel="noopener">simulator</a>]</span>
+      </div>
+    </div>
+    <pre id="log" aria-label="Console"></pre>
+  </div>
+</main>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

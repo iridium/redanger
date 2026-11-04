@@ -2,7 +2,6 @@ package kimba
 
 import (
 	"bytes"
-	"strings"
 )
 
 const (
@@ -78,36 +77,33 @@ const (
 
 // CSS property IDs from KBC.java (propID & 3 determines wire type)
 const (
-	cssPropFont           = 2  // type 2 = number (UVL)
-	cssPropColor          = 3  // type 3 = color (int32)
-	cssPropBgColor        = 7  // type 3 = color (int32)
-	cssPropTextDecoration = 9  // type 1 = byte
-	cssPropTextTransform  = 13 // type 1 = byte
-	cssPropMarginLeft     = 14 // type 2 = coord (SVL)
-	cssPropMarginTop      = 18 // type 2 = coord (SVL)
-	cssPropMarginRight    = 22 // type 2 = coord (SVL)
-	cssPropMarginBottom   = 26 // type 2 = coord (SVL)
-	cssPropPaddingLeft    = 34 // type 2 = dimension (UVL)
-	cssPropDisplay        = 37 // type 1 = byte
-	cssPropPaddingTop     = 38 // type 2 = dimension (UVL)
-	cssPropListStyleType  = 41 // type 1 = byte
-	cssPropPaddingRight   = 42 // type 2 = dimension (UVL)
-	cssPropPaddingBottom  = 46 // type 2 = dimension (UVL)
-	cssPropWhiteSpace     = 61 // type 1 = byte
-	cssPropTextAlign      = 85 // type 1 = byte (0=center, 1=left, 2=right, 3=justify)
-	cssPropLineHeight     = 78 // type 2 = number (UVL)
-	cssPropFloat          = 57 // type 1 = byte (0=none, 1=left, 2=right)
-	// Border style properties
+	cssPropFont              = 2  // type 2 = number (UVL)
+	cssPropColor             = 3  // type 3 = color (int32)
+	cssPropBgColor           = 7  // type 3 = color (int32)
+	cssPropTextDecoration    = 9  // type 1 = byte
+	cssPropTextTransform     = 13 // type 1 = byte
+	cssPropMarginLeft        = 14 // type 2 = coord (SVL)
+	cssPropMarginTop         = 18 // type 2 = coord (SVL)
+	cssPropMarginRight       = 22 // type 2 = coord (SVL)
+	cssPropMarginBottom      = 26 // type 2 = coord (SVL)
+	cssPropPaddingLeft       = 34 // type 2 = dimension (UVL)
+	cssPropDisplay           = 37 // type 1 = byte
+	cssPropPaddingTop        = 38 // type 2 = dimension (UVL)
+	cssPropListStyleType     = 41 // type 1 = byte
+	cssPropPaddingRight      = 42 // type 2 = dimension (UVL)
+	cssPropPaddingBottom     = 46 // type 2 = dimension (UVL)
+	cssPropWhiteSpace        = 61 // type 1 = byte
+	cssPropTextAlign         = 85 // type 1 = byte (0=center, 1=left, 2=right, 3=justify)
+	cssPropLineHeight        = 78 // type 2 = number (UVL)
+	cssPropFloat             = 57 // type 1 = byte (0=none, 1=left, 2=right)
 	cssPropBorderTopStyle    = 25 // type 1 = byte
 	cssPropBorderRightStyle  = 29 // type 1 = byte
 	cssPropBorderBottomStyle = 33 // type 1 = byte
 	cssPropBorderLeftStyle   = 21 // type 1 = byte
-	// Border width properties
 	cssPropBorderTopWidth    = 58 // type 2 = dimension (UVL)
 	cssPropBorderRightWidth  = 62 // type 2 = dimension (UVL)
 	cssPropBorderBottomWidth = 66 // type 2 = dimension (UVL)
 	cssPropBorderLeftWidth   = 54 // type 2 = dimension (UVL)
-	// Border color properties
 	cssPropBorderTopColor    = 19 // type 3 = color (int32)
 	cssPropBorderRightColor  = 23 // type 3 = color (int32)
 	cssPropBorderBottomColor = 27 // type 3 = color (int32)
@@ -127,9 +123,7 @@ const (
 
 const (
 	screenWidth  = 240
-	charWidth    = 8
-	lineHeight   = 16
-	charsPerLine = screenWidth / charWidth // 30
+	screenHeight = 160
 )
 
 // Input type constants for KBC (from KDHTMLInputElementGenerated).
@@ -166,22 +160,23 @@ const (
 
 const textNodeTag = "#text"
 
-// transparentRGBA is the Chrome computed style value for a fully transparent
+// transparentRGBA is the computed style value for a fully transparent
 // background, used as a sentinel to skip default backgrounds.
 const transparentRGBA = "rgba(0, 0, 0, 0)"
 
 const fontWeightBoldThreshold = 700
 
 const (
-	defaultImageHeight   = 60 // fallback height when image dimensions unknown
+	defaultImageWidth    = 32 // fallback size when image dimensions unknown
+	defaultImageHeight   = 32
 	hrHeight             = 4
 	checkboxSize         = 12
 	buttonPaddingH       = 16 // horizontal padding for submit/reset/button
-	buttonPaddingV       = 4  // vertical padding added to lineHeight
+	buttonPaddingV       = 4  // vertical padding added to the line height
 	defaultInputSize     = 20 // character width for text/password inputs
 	selectMinOptionWidth = 8  // minimum character width for select options
 	selectArrowSpace     = 20 // extra width for dropdown arrow
-	textareaPadding      = 4  // padding for textarea elements
+	textareaPadding      = 4
 )
 
 type tagInfo struct {
@@ -406,38 +401,4 @@ func (b *kbcBuilder) writeAttrString(attrID int, value string) {
 func (b *kbcBuilder) writeAttrColor(attrID int, color int32) {
 	b.writeByte(byte(attrID))
 	b.writeInt32(color)
-}
-
-func (b *kbcBuilder) writeTextNode(text string, x, y, wrapChars int) {
-	if wrapChars <= 0 {
-		wrapChars = charsPerLine
-	}
-	lines := wrapText(text, wrapChars)
-	if len(lines) == 0 {
-		return
-	}
-
-	// TEXT tag: no children, no attributes
-	b.writeTagOpen(tagText, false, false)
-
-	// Number of extents (one per line)
-	b.writeUVL(len(lines))
-
-	// Build the full text string and track offsets
-	var fullText strings.Builder
-	offsets := make([]int, len(lines))
-	for i, line := range lines {
-		offsets[i] = fullText.Len()
-		fullText.WriteString(line)
-	}
-
-	// Write extent data: x(SVL), y(SVL), textOffset(UVL)
-	for i := range lines {
-		b.writeSVL(x)
-		b.writeSVL(y + i*lineHeight)
-		b.writeUVL(offsets[i])
-	}
-
-	// Null-terminated text content
-	b.writeNullString(fullText.String())
 }

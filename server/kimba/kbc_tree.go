@@ -49,34 +49,24 @@ func collapseWhitespace(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
-func wrapText(text string, maxChars int) []string {
-	if text == "" {
-		return nil
-	}
-
-	var lines []string
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return nil
-	}
-
-	var line strings.Builder
-	for _, word := range words {
-		if line.Len() == 0 {
-			line.WriteString(word)
-		} else if line.Len()+1+len(word) <= maxChars {
-			line.WriteByte(' ')
-			line.WriteString(word)
-		} else {
-			lines = append(lines, line.String())
-			line.Reset()
-			line.WriteString(word)
+// collapseSpaces collapses runs of HTML whitespace to a single space without
+// trimming. (Non-breaking spaces are kept.)
+func collapseSpaces(s string) string {
+	var b strings.Builder
+	inSpace := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case ' ', '\t', '\n', '\r', '\f':
+			if !inSpace {
+				b.WriteByte(' ')
+				inSpace = true
+			}
+		default:
+			b.WriteByte(c)
+			inSpace = false
 		}
 	}
-	if line.Len() > 0 {
-		lines = append(lines, line.String())
-	}
-	return lines
+	return b.String()
 }
 
 func resolveURL(base, ref string) string {
@@ -92,4 +82,30 @@ func resolveURL(base, ref string) string {
 		return ref
 	}
 	return baseURL.ResolveReference(refURL).String()
+}
+
+// stripInvisible removes zero-width and formatting characters that browsers
+// don't draw but the device would show as missing-glyph boxes.
+func stripInvisible(s string) string {
+	if strings.IndexFunc(s, isInvisible) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isInvisible(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isInvisible(r rune) bool {
+	switch {
+	case r == 0xAD, r == 0x34F, r == 0x61C, r == 0xFEFF:
+		return true
+	case r >= 0x200B && r <= 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2060 && r <= 0x206F:
+		return true
+	case r >= 0xFE00 && r <= 0xFE0F: // variation selectors
+		return true
+	}
+	return false
 }

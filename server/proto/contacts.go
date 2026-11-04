@@ -127,7 +127,6 @@ func writeContact(b *Body, c *Contact, version int32) {
 	b.WriteInt(0)     // cardLastMod
 	b.WriteInt(c.Icon)
 
-	// Addresses
 	b.WriteInt(int32(len(c.Addresses)))
 	for i, a := range c.Addresses {
 		b.WriteInt(int32(i + 1))
@@ -139,7 +138,6 @@ func writeContact(b *Body, c *Contact, version int32) {
 		b.WriteString(a.Country)
 	}
 
-	// Emails
 	b.WriteInt(int32(len(c.Emails)))
 	for i, e := range c.Emails {
 		b.WriteInt(int32(i + 1))
@@ -147,7 +145,6 @@ func writeContact(b *Body, c *Contact, version int32) {
 		b.WriteString(e.Address)
 	}
 
-	// IMs
 	b.WriteInt(int32(len(c.IMs)))
 	for i, im := range c.IMs {
 		b.WriteInt(int32(i + 1))
@@ -170,7 +167,6 @@ func writeContact(b *Body, c *Contact, version int32) {
 		}
 	}
 
-	// URLs
 	b.WriteInt(int32(len(c.URLs)))
 	for i, u := range c.URLs {
 		b.WriteInt(int32(i + 1))

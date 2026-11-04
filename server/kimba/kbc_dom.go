@@ -1,87 +1,102 @@
 package kimba
 
 import (
+	"context"
 	"log"
+	"net/url"
 	"strconv"
 	"strings"
 )
 
-func chromeHTMLToKBC(pageURL string) []byte {
-	domTree, title, err := fetchPageViaChrome(pageURL)
+// htmlToKBC renders an HTML document to KBC. pageURL is the URL the document
+// was served from (after redirects).
+func htmlToKBC(pageURL string, body []byte, contentType string) []byte {
+	page, err := renderHTML(context.Background(), pageURL, body, contentType)
 	if err != nil {
-		log.Printf("Kimba: Chrome fetch failed for %s: %v", pageURL, err)
+		log.Printf("Kimba: render failed for %s: %v", pageURL, err)
 		return nil
 	}
 
-	ls := &layoutState{pageURL: pageURL}
+	ls := &layoutState{pageURL: page.baseURL}
 
 	// Intern the default (empty) style context as entry 1.
 	defaultCtx := newDefaultStyleContext()
 	ls.styles.intern(defaultCtx)
 
-	ls.title = title
+	ls.title = page.title
 
-	// Build box tree from the Chrome DOM tree.
-	bodyBox := chromeBuildBoxTree(domTree, ls, false, nil)
+	bodyBox := buildBoxTree(page.body, ls, false, nil)
 	if bodyBox == nil {
-		log.Printf("Kimba: Chrome DOM produced empty box tree for %s", pageURL)
+		log.Printf("Kimba: empty box tree for %s", pageURL)
 		return nil
 	}
 
-	// Extract body-level background/text colors from computed styles.
+	// Body-level background/text colors.
 	var colors bodyColors
-	if domTree.Styles != nil {
-		if c, ok := parseColor(domTree.Styles["backgroundColor"]); ok {
-			colors.bgColor = c
-			colors.bgColorSet = true
-		}
-		if c, ok := parseColor(domTree.Styles["color"]); ok {
-			colors.textColor = c
-			colors.textColorSet = true
-		}
+	if c, ok := parseColor(page.body.Styles["backgroundColor"]); ok &&
+		page.body.Styles["backgroundColor"] != transparentRGBA {
+		colors.bgColor = c
+		colors.bgColorSet = true
+	}
+	if c, ok := parseColor(page.body.Styles["color"]); ok {
+		colors.textColor = c
+		colors.textColorSet = true
 	}
 
 	return buildKBCOutput(ls, bodyBox, colors)
 }
 
-func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, parentStyle *styleContext) *layoutBox {
+func buildBoxTree(node *domNode, ls *layoutState, parentPre bool, parentStyle *styleContext) *layoutBox {
 	if node == nil {
 		return nil
 	}
 
-	// Text node
 	if node.Tag == textNodeTag {
 		text := node.Text
 		if !parentPre {
-			text = collapseWhitespace(text)
+			// Collapse runs of spaces but keep one at either edge: it
+			// separates this text from its inline neighbours.
+			text = collapseSpaces(text)
 		}
+		text = stripInvisible(text)
 		if text == "" {
 			return nil
 		}
-		return &layoutBox{
+		box := &layoutBox{
 			kbcTag:       tagText,
 			text:         text,
 			isText:       true,
 			preformatted: parentPre,
+			fontID:       defaultFontID,
 			inputType:    -1,
 			formID:       -1,
 			formMethod:   -1,
 			olStart:      -1,
 			selectIdx:    -1,
 		}
+		if parentStyle != nil {
+			if parentStyle.fontID >= 0 {
+				box.fontID = parentStyle.fontID
+			}
+			box.nowrap = parentStyle.whiteSpace == whiteSpaceNowrap
+		}
+		return box
 	}
 
 	tag := node.Tag
 
-	// Compute style context from Chrome's computed styles.
-	ctx := chromeComputeStyleContext(node, parentStyle)
+	ctx := styleContextFromComputed(node, parentStyle)
 
-	// Chrome already filters display:none in the JS extraction, but
-	// double-check visibility:hidden.
+	// display:none elements never reach here (renderHTML drops them).
 	if node.Styles != nil {
 		if node.Styles["visibility"] == "hidden" {
 			return nil
 		}
+	}
+
+	// Only list items get markers; the device draws one for any <li>.
+	if tag == "li" && node.Styles["display"] != "list-item" {
+		ctx.listStyleType = listStyleNone
 	}
 
 	ctxIdx := ls.styles.intern(ctx)
@@ -111,6 +126,14 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 		selectIdx:    -1,
 	}
 
+	switch node.Styles["display"] {
+	case "inline-block", "inline-flex", "inline-grid", "inline-table":
+		box.inlineBlock = true
+	}
+	box.centerBlocks = node.Styles["textAlign"] == "-webkit-center"
+	box.autoMarginL = node.Styles["marginLeft"] == "auto"
+	box.autoMarginR = node.Styles["marginRight"] == "auto"
+
 	// Block/inline classification from computed display.
 	switch ctx.display {
 	case displayBlock:
@@ -121,7 +144,6 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 		box.isBlock = tagByName[tag].isBlock
 	}
 
-	// Element-specific attribute extraction.
 	switch tag {
 	case "a":
 		box.href = nodeAttr(node, "href")
@@ -134,14 +156,23 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 			box.imgSrc = resolveURL(ls.pageURL, box.imgSrc)
 		}
 		box.imgAlt = nodeAttr(node, "alt")
-		if w, err := strconv.Atoi(nodeAttr(node, "width")); err == nil && w > 0 {
-			box.width = w
+		if isSVGURL(box.imgSrc) {
+			// The device can't decode SVG: show the alt text instead.
+			return altTextBox(box.imgAlt, ctx)
 		}
-		if h, err := strconv.Atoi(nodeAttr(node, "height")); err == nil && h > 0 {
-			box.height = h
+		w, werr := strconv.Atoi(nodeAttr(node, "width"))
+		h, herr := strconv.Atoi(nodeAttr(node, "height"))
+		if (werr == nil && w <= 0) || (herr == nil && h <= 0) {
+			return nil // zero-size (spacer/tracking) image
+		}
+		if werr == nil {
+			box.attrW = w
+		}
+		if herr == nil {
+			box.attrH = h
 		}
 		// Skip spacer images
-		if box.width > 0 && box.height > 0 && box.width <= spacerMaxDim && box.height <= spacerMaxDim {
+		if box.attrW > 0 && box.attrH > 0 && box.attrW <= spacerMaxDim && box.attrH <= spacerMaxDim {
 			return nil
 		}
 		if box.imgAlt == "" && box.imgSrc == "" {
@@ -163,14 +194,14 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 		box.inputType = parseInputType(nodeAttr(node, "type"))
 		box.inputName = nodeAttr(node, "name")
 		box.inputValue = nodeAttr(node, "value")
-		box.formID = chromeFindFormID(node, ls)
+		box.formID = findFormID(node, ls)
 	case "select":
 		box.inputName = nodeAttr(node, "name")
 		box.selectIdx = 0
-		box.formID = chromeFindFormID(node, ls)
+		box.formID = findFormID(node, ls)
 	case "textarea":
 		box.inputName = nodeAttr(node, "name")
-		box.inputValue = chromeExtractAllText(node)
+		box.inputValue = extractAllText(node)
 		box.cols, _ = strconv.Atoi(nodeAttr(node, "cols"))
 		if box.cols <= 0 {
 			box.cols = defaultTextareaCols
@@ -179,7 +210,9 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 		if box.rows <= 0 {
 			box.rows = defaultTextareaRows
 		}
-		box.formID = chromeFindFormID(node, ls)
+		box.formID = findFormID(node, ls)
+	case "td", "th":
+		box.colspan, _ = strconv.Atoi(nodeAttr(node, "colspan"))
 	case "ol":
 		if s := nodeAttr(node, "start"); s != "" {
 			box.olStart, _ = strconv.Atoi(s)
@@ -190,11 +223,11 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 		box.kbcTag = tagInput
 		box.inputType = inputTypeSubmit
 		box.inputName = nodeAttr(node, "name")
-		box.inputValue = collapseWhitespace(chromeExtractAllText(node))
+		box.inputValue = collapseWhitespace(extractAllText(node))
 		if box.inputValue == "" {
 			box.inputValue = defaultSubmitLabel
 		}
-		box.formID = chromeFindFormID(node, ls)
+		box.formID = findFormID(node, ls)
 		box.isBlock = false
 	}
 
@@ -203,11 +236,10 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 		tag == "hr" || tag == "textarea" || tag == "button"
 
 	if !isLeaf && tag == "select" {
-		// Build option children for <select>.
-		box.children = chromeBuildSelectOptions(node, ls)
+		box.children = buildSelectOptions(node, ls)
 	} else if !isLeaf {
 		for i := range node.Children {
-			child := chromeBuildBoxTree(&node.Children[i], ls, pre, &ctx)
+			child := buildBoxTree(&node.Children[i], ls, pre, &ctx)
 			if child != nil {
 				box.children = append(box.children, child)
 			}
@@ -217,7 +249,7 @@ func chromeBuildBoxTree(node *chromeDOMNode, ls *layoutState, parentPre bool, pa
 	return box
 }
 
-func chromeBuildSelectOptions(node *chromeDOMNode, ls *layoutState) []*layoutBox {
+func buildSelectOptions(node *domNode, ls *layoutState) []*layoutBox {
 	var opts []*layoutBox
 	idx := 0
 	for i := range node.Children {
@@ -225,9 +257,9 @@ func chromeBuildSelectOptions(node *chromeDOMNode, ls *layoutState) []*layoutBox
 		if child.Tag != "option" {
 			continue
 		}
-		ctx := chromeComputeStyleContext(child, nil)
+		ctx := styleContextFromComputed(child, nil)
 		ctxIdx := ls.styles.intern(ctx)
-		text := collapseWhitespace(chromeExtractAllText(child))
+		text := collapseWhitespace(extractAllText(child))
 		value := nodeAttr(child, "value")
 		if value == "" {
 			value = text
@@ -251,11 +283,9 @@ func chromeBuildSelectOptions(node *chromeDOMNode, ls *layoutState) []*layoutBox
 	return opts
 }
 
-// chromeComputeStyleContext maps Chrome's computed style values to a styleContext.
-// Chrome gives us fully resolved, canonical values (e.g. "rgb(0, 0, 255)"),
-// so we don't need CSS cascade, specificity, or inheritance logic. Chrome
-// already did that. We just parse the final values.
-func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleContext {
+// styleContextFromComputed maps computed style values (already cascaded and
+// resolved by renderHTML, e.g. "rgb(0, 0, 255)", "8px") to a styleContext.
+func styleContextFromComputed(node *domNode, parent *styleContext) styleContext {
 	ctx := newDefaultStyleContext()
 	s := node.Styles
 	if s == nil {
@@ -265,7 +295,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		return ctx
 	}
 
-	// Color
 	if v, ok := s["color"]; ok {
 		if c, cok := parseColor(v); cok {
 			ctx.color = c
@@ -273,7 +302,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Background color
 	if v, ok := s["backgroundColor"]; ok {
 		if c, cok := parseColor(v); cok {
 			// Don't set transparent/white backgrounds that are just defaults
@@ -284,16 +312,13 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Font size to font ID
 	if v, ok := s["fontSize"]; ok {
 		ctx.fontID = fontSizeToFontID(v, ctx.fontID)
 	}
 
-	// Font weight
 	if v, ok := s["fontWeight"]; ok {
 		weight, err := strconv.Atoi(v)
 		if err == nil && weight >= fontWeightBoldThreshold {
-			// Bold
 			switch ctx.fontID {
 			case fontBortItalic9:
 				ctx.fontID = fontBortBoldItalic9
@@ -305,7 +330,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Font style
 	if v, ok := s["fontStyle"]; ok {
 		if v == "italic" || v == "oblique" {
 			if ctx.fontID == fontBortBold9 {
@@ -316,7 +340,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Display
 	if v, ok := s["display"]; ok {
 		switch v {
 		case "block", "flex", "grid", "table", "list-item",
@@ -330,9 +353,8 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Text decoration
 	if v, ok := s["textDecoration"]; ok {
-		// Chrome returns computed like "none solid rgb(0, 0, 0)" or "underline solid rgb(0, 0, 255)"
+		// e.g. "none", "underline", "underline line-through"
 		vl := strings.ToLower(v)
 		if strings.Contains(vl, "line-through") {
 			ctx.textDecoration = textDecorationStrikethrough
@@ -343,7 +365,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Text transform
 	if v, ok := s["textTransform"]; ok {
 		switch v {
 		case "none":
@@ -357,10 +378,9 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Text align
 	if v, ok := s["textAlign"]; ok {
 		switch v {
-		case "center":
+		case "center", "-webkit-center":
 			ctx.textAlign = textAlignCenter
 		case "right":
 			ctx.textAlign = textAlignRight
@@ -371,7 +391,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// White space
 	if v, ok := s["whiteSpace"]; ok {
 		switch v {
 		case "normal":
@@ -383,7 +402,7 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Margins (Chrome returns computed as "0px", "8px", etc.)
+	// Margins (computed as "0px", "8px", etc.)
 	if v, ok := s["marginTop"]; ok {
 		ctx.marginTop = parsePx(v)
 	}
@@ -397,7 +416,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		ctx.marginLeft = parsePx(v)
 	}
 
-	// Padding
 	if v, ok := s["paddingTop"]; ok {
 		ctx.paddingTop = parsePx(v)
 	}
@@ -411,14 +429,12 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		ctx.paddingLeft = parsePx(v)
 	}
 
-	// Line height
 	if v, ok := s["lineHeight"]; ok {
 		if v != "normal" {
 			ctx.lineHeight = parsePx(v)
 		}
 	}
 
-	// Float
 	if v, ok := s["float"]; ok {
 		switch v {
 		case "none":
@@ -430,7 +446,6 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// List style type
 	if v, ok := s["listStyleType"]; ok {
 		switch v {
 		case "disc":
@@ -439,14 +454,23 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 			ctx.listStyleType = listStyleCircle
 		case "square":
 			ctx.listStyleType = listStyleSquare
-		case "decimal":
+		case "decimal", "decimal-leading-zero":
 			ctx.listStyleType = listStyleDecimal
+		case "lower-roman":
+			ctx.listStyleType = listStyleLowerRoman
+		case "upper-roman":
+			ctx.listStyleType = listStyleUpperRoman
+		case "lower-alpha", "lower-latin":
+			ctx.listStyleType = listStyleLowerAlpha
+		case "upper-alpha", "upper-latin":
+			ctx.listStyleType = listStyleUpperAlpha
+		case "lower-greek":
+			ctx.listStyleType = listStyleLowerGreek
 		case "none":
 			ctx.listStyleType = listStyleNone
 		}
 	}
 
-	// Width/height from computed styles
 	if v, ok := s["width"]; ok {
 		if px := parsePx(v); px > 0 {
 			ctx.cssWidth = px
@@ -458,10 +482,8 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 		}
 	}
 
-	// Borders
-	chromeParseBorder(&ctx, s)
+	parseBorders(&ctx, s)
 
-	// Inherit inheritable properties from parent.
 	if parent != nil {
 		inheritFromParent(&ctx, parent)
 	}
@@ -469,8 +491,7 @@ func chromeComputeStyleContext(node *chromeDOMNode, parent *styleContext) styleC
 	return ctx
 }
 
-func chromeParseBorder(ctx *styleContext, s map[string]string) {
-	// Border widths
+func parseBorders(ctx *styleContext, s map[string]string) {
 	if v, ok := s["borderTopWidth"]; ok {
 		ctx.borderTopWidth = parsePx(v)
 	}
@@ -484,7 +505,6 @@ func chromeParseBorder(ctx *styleContext, s map[string]string) {
 		ctx.borderLeftWidth = parsePx(v)
 	}
 
-	// Border styles
 	if v, ok := s["borderTopStyle"]; ok {
 		ctx.borderTopStyle = parseBorderStyleValue(v)
 	}
@@ -498,7 +518,6 @@ func chromeParseBorder(ctx *styleContext, s map[string]string) {
 		ctx.borderLeftStyle = parseBorderStyleValue(v)
 	}
 
-	// Border colors
 	if v, ok := s["borderTopColor"]; ok {
 		if c, cok := parseColor(v); cok {
 			ctx.borderTopColor = c
@@ -525,34 +544,64 @@ func chromeParseBorder(ctx *styleContext, s map[string]string) {
 	}
 }
 
-func nodeAttr(node *chromeDOMNode, key string) string {
+func nodeAttr(node *domNode, key string) string {
 	if node.Attrs == nil {
 		return ""
 	}
 	return node.Attrs[key]
 }
 
-func chromeExtractAllText(node *chromeDOMNode) string {
+func extractAllText(node *domNode) string {
 	if node.Tag == textNodeTag {
 		return node.Text
 	}
 	var sb strings.Builder
 	for i := range node.Children {
-		sb.WriteString(chromeExtractAllText(&node.Children[i]))
+		sb.WriteString(extractAllText(&node.Children[i]))
 	}
 	return sb.String()
 }
 
-// chromeFindFormID finds the form index for a form control. Since we don't have
-// parent pointers in the Chrome DOM tree, we track form IDs during tree
+// findFormID finds the form index for a form control. Since we don't have
+// parent pointers in the styled DOM tree, we track form IDs during tree
 // construction. Form controls that aren't inside a <form> get formID -1.
-// The actual form assignment happens during chromeBuildBoxTree via the
+// The actual form assignment happens during buildBoxTree via the
 // ls.formCount that gets incremented when we encounter a <form>.
-func chromeFindFormID(node *chromeDOMNode, ls *layoutState) int {
+func findFormID(node *domNode, ls *layoutState) int {
 	// Since we process the tree depth-first, the most recently seen form is
 	// ls.formCount - 1. If no forms have been seen, return -1.
 	if ls.formCount > 0 {
 		return ls.formCount - 1
 	}
 	return -1
+}
+
+func isSVGURL(u string) bool {
+	if pu, err := url.Parse(u); err == nil {
+		return strings.HasSuffix(strings.ToLower(pu.Path), ".svg")
+	}
+	return false
+}
+
+// altTextBox stands in for an image the device can't show.
+func altTextBox(alt string, ctx styleContext) *layoutBox {
+	alt = collapseWhitespace(alt)
+	if alt == "" {
+		return nil
+	}
+	font := defaultFontID
+	if ctx.fontID >= 0 {
+		font = ctx.fontID
+	}
+	return &layoutBox{
+		kbcTag:     tagText,
+		text:       alt,
+		isText:     true,
+		fontID:     font,
+		inputType:  -1,
+		formID:     -1,
+		formMethod: -1,
+		olStart:    -1,
+		selectIdx:  -1,
+	}
 }

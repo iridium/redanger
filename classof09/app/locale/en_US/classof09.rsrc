@@ -1,0 +1,26 @@
+package "com.redanger.classof09"
+
+interface "{source}com/redanger/classof09/Resources.java"
+events "{source}com/redanger/classof09/Events.java"
+
+string ID_LOCALE     "en_US"
+string ID_APP_NAME   "Class of '09"
+string ID_APP_CLASS  "com.redanger.classof09.ClassOf09"
+string ID_APP_FLAGS  ""
+string ID_CHOOSER_CATEGORY "games"
+
+bitmap ID_LARGE_ICON     "../../assets/LargeIcon.png"
+bitmap ID_SMALL_ICON     "../../assets/SmallIcon.png"
+# OS 2.3+ draws the launcher's own background and overlays this; an opaque
+# ID_SPLASH_SCREEN would show as a box around the logo.
+bitmap ID_SPLASH_SCREEN_NO_TITLE  "../../assets/Splash.png"
+
+event kEventFrame
+
+# Games-screen preview: just the logo over the launcher's background, no name text.
+splashScreen ID_SPLASH_SCREEN_RESOURCE
+	image
+		bitmap = ID_SPLASH_SCREEN_NO_TITLE
+		alignWithParentLeft = 0
+		alignWithParentTop = 0
+endSplashScreen

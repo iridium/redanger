@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 24 24" fill="currentColor">
+  <!-- Hiptop Jump button: eight dots on a ring, the one at 3 o'clock larger -->
+  <circle cx="8" cy="0" r="3.8"/>
+  <circle cx="5.657" cy="5.657" r="1.85"/>
+  <circle cx="0" cy="8" r="1.85"/>
+  <circle cx="-5.657" cy="5.657" r="1.85"/>
+  <circle cx="-8" cy="0" r="1.85"/>
+  <circle cx="-5.657" cy="-5.657" r="1.85"/>
+  <circle cx="0" cy="-8" r="1.85"/>
+  <circle cx="5.657" cy="-5.657" r="1.85"/>
+</svg>

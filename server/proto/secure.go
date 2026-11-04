@@ -28,8 +28,8 @@ type SecureConn struct {
 	cipher *blowfish.Cipher
 
 	// CBC state (persists across chunks)
-	encIV [blowfishBlockSize]byte // encrypt direction
-	decIV [blowfishBlockSize]byte // decrypt direction
+	encIV [blowfishBlockSize]byte
+	decIV [blowfishBlockSize]byte
 
 	// read buffering
 	buf    []byte
@@ -65,7 +65,6 @@ func Handshake(conn net.Conn) (*SecureConn, error) {
 		return nil, fmt.Errorf("generate prime: %w", err)
 	}
 
-	// Generator g = 2
 	g := big.NewInt(2)
 
 	// Server random: 16 random bytes, prepend 0 to ensure positive
@@ -76,7 +75,6 @@ func Handshake(conn net.Conn) (*SecureConn, error) {
 	}
 	serverRandom := new(big.Int).SetBytes(serverRandomBytes)
 
-	// Compute serverPublic = g^serverRandom mod p
 	serverPublic := new(big.Int).Exp(g, serverRandom, p)
 
 	// Send 66 bytes: [32-byte p][0x00][1-byte g][32-byte serverPublic]
@@ -97,10 +95,8 @@ func Handshake(conn net.Conn) (*SecureConn, error) {
 	}
 	clientPublic := new(big.Int).SetBytes(clientBuf[0:32])
 
-	// Compute shared secret = clientPublic^serverRandom mod p
 	sharedSecret := new(big.Int).Exp(clientPublic, serverRandom, p)
 
-	// Zero-pad shared secret to 32 bytes
 	key := make([]byte, 32)
 	padBigInt(key, sharedSecret)
 
@@ -140,13 +136,11 @@ func Handshake(conn net.Conn) (*SecureConn, error) {
 }
 
 func (sc *SecureConn) Read(p []byte) (int, error) {
-	// If buffer is empty, read a new chunk
 	if sc.bufOff >= sc.bufLen {
 		if err := sc.readChunk(); err != nil {
 			return 0, err
 		}
 	}
-	// Return whatever is available
 	n := copy(p, sc.buf[sc.bufOff:sc.bufLen])
 	sc.bufOff += n
 	return n, nil
@@ -171,7 +165,6 @@ func (sc *SecureConn) cbcEncrypt(dst, src []byte) {
 		for j := range blowfishBlockSize {
 			dst[i+j] = src[i+j] ^ sc.encIV[j]
 		}
-		// Encrypt block
 		sc.cipher.Encrypt(dst[i:i+blowfishBlockSize], dst[i:i+blowfishBlockSize])
 		// Update IV to this ciphertext block
 		copy(sc.encIV[:], dst[i:i+blowfishBlockSize])
@@ -183,7 +176,6 @@ func (sc *SecureConn) cbcDecrypt(dst, src []byte) {
 	for i := 0; i < len(src); i += blowfishBlockSize {
 		// Save ciphertext block before decryption
 		copy(saved[:], src[i:i+blowfishBlockSize])
-		// Decrypt block
 		sc.cipher.Decrypt(dst[i:i+blowfishBlockSize], src[i:i+blowfishBlockSize])
 		// XOR with previous ciphertext (or IV)
 		for j := range blowfishBlockSize {
@@ -195,7 +187,6 @@ func (sc *SecureConn) cbcDecrypt(dst, src []byte) {
 }
 
 func (sc *SecureConn) readChunk() error {
-	// Read 2-byte length
 	var lenBuf [2]byte
 	if _, err := io.ReadFull(sc.raw, lenBuf[:]); err != nil {
 		return err
@@ -206,13 +197,11 @@ func (sc *SecureConn) readChunk() error {
 		return fmt.Errorf("bad chunk size %d", chunkLen)
 	}
 
-	// Read encrypted data
 	encrypted := make([]byte, chunkLen)
 	if _, err := io.ReadFull(sc.raw, encrypted); err != nil {
 		return err
 	}
 
-	// Decrypt (Blowfish-CBC)
 	decrypted := make([]byte, chunkLen)
 	sc.cbcDecrypt(decrypted, encrypted)
 
@@ -258,7 +247,6 @@ func (sc *SecureConn) writeChunk(data []byte) error {
 	h := sha1.Sum(plain[:dataLen+padLen+1])
 	copy(plain[dataLen+padLen+1:], h[:])
 
-	// Encrypt (Blowfish-CBC)
 	encrypted := make([]byte, plainLen)
 	sc.cbcEncrypt(encrypted, plain)
 

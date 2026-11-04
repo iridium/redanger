@@ -1,0 +1,6 @@
+node_modules/
+dist/
+public/vendor/
+shim/out/
+tools/test/*.jar
+tools/test/*.class

@@ -70,7 +70,6 @@ function adler32(b) { let a = 1, s = 0; for (const v of b) { a = (a + v) % 65521
 function modpow(b, e, m) { let r = 1n; b %= m; while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; } return r; }
 function modinv(a, m) { let [g, x, ng, nx] = [m, 0n, a % m, 1n]; while (ng) { const q = g / ng; [g, ng] = [ng, g - q * ng]; [x, nx] = [nx, x - q * nx]; } return ((x % m) + m) % m; }
 
-// DER encoding.
 function der(tag, body) {
   const n = body.length;
   return cat(new Uint8Array([tag, ...(n < 0x80 ? [n] : n < 0x100 ? [0x81, n] : [0x82, n >> 8, n & 255])]), body);

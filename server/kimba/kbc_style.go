@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	displayBlock  = 0 // block-level element
-	displayInline = 1 // inline-level element
-	displayNone   = 3 // not rendered
+	displayBlock  = 0
+	displayInline = 1
+	displayNone   = 3
 )
 
 const (
@@ -17,11 +17,12 @@ const (
 	textDecorationStrikethrough = 2
 )
 
+// Text transform values (KBC_STYLE_TEXT_TRANSFORM_*).
 const (
 	textTransformNone       = 0
 	textTransformCapitalize = 1
-	textTransformUppercase  = 2
-	textTransformLowercase  = 3
+	textTransformLowercase  = 2
+	textTransformUppercase  = 3
 )
 
 // Text align values for styleContext.textAlign (internal representation).
@@ -45,12 +46,18 @@ const (
 	floatRight = 2
 )
 
+// List style types (KBC_STYLE_LIST_STYLE_TYPE_*).
 const (
-	listStyleDisc    = 0
-	listStyleCircle  = 1
-	listStyleSquare  = 2
-	listStyleDecimal = 3
-	listStyleNone    = 5
+	listStyleDisc       = 0
+	listStyleCircle     = 1
+	listStyleSquare     = 2
+	listStyleDecimal    = 3
+	listStyleLowerRoman = 4
+	listStyleUpperRoman = 5
+	listStyleLowerAlpha = 6
+	listStyleUpperAlpha = 7
+	listStyleNone       = 8
+	listStyleLowerGreek = 10
 )
 
 // Border style enum values (from KBC.java).
@@ -85,27 +92,26 @@ const linkColorBlue = 0x0000FF
 const emToPx = 12
 
 type styleContext struct {
-	fontID         int // -1=not set, 0+=font ID from KFontMgr
-	color          int32
-	colorSet       bool
-	bgColor        int32
-	bgColorSet     bool
-	textDecoration int // -1=not set, 0=none, 1=underline, 2=strikethrough
-	textTransform  int // -1=not set, 0=none, 1=capitalize, 2=uppercase, 3=lowercase
-	textAlign      int // -1=not set, 0=left(default), 1=center, 2=right, 3=left(explicit), 4=justify
-	marginLeft     int // sentinel -1=not set
-	marginTop      int
-	marginRight    int
-	marginBottom   int
-	paddingLeft    int // -1=not set
-	display        int // -1=not set, 0=block, 1=inline, 3=none
-	paddingTop     int
-	listStyleType  int // -1=not set, 0=disc, 1=circle, 2=square, 3=decimal
-	paddingRight   int
-	paddingBottom  int
-	whiteSpace     int // -1=not set, 0=normal, 1=pre, 2=nowrap
-	lineHeight     int // -1=not set
-	// Border properties
+	fontID            int // -1=not set, 0+=font ID from KFontMgr
+	color             int32
+	colorSet          bool
+	bgColor           int32
+	bgColorSet        bool
+	textDecoration    int // -1=not set, 0=none, 1=underline, 2=strikethrough
+	textTransform     int // -1=not set, else a textTransform* value
+	textAlign         int // -1=not set, 0=left(default), 1=center, 2=right, 3=left(explicit), 4=justify
+	marginLeft        int // sentinel -1=not set
+	marginTop         int
+	marginRight       int
+	marginBottom      int
+	paddingLeft       int // -1=not set
+	display           int // -1=not set, 0=block, 1=inline, 3=none
+	paddingTop        int
+	listStyleType     int // -1=not set, else a listStyle* value
+	paddingRight      int
+	paddingBottom     int
+	whiteSpace        int // -1=not set, 0=normal, 1=pre, 2=nowrap
+	lineHeight        int // -1=not set
 	borderTopWidth    int // -1=not set
 	borderRightWidth  int
 	borderBottomWidth int
@@ -119,8 +125,7 @@ type styleContext struct {
 	borderBottomColor int32
 	borderLeftColor   int32
 	borderColorSet    [4]bool // top, right, bottom, left
-	// Float
-	float int // -1=not set, 0=none, 1=left, 2=right
+	float             int     // -1=not set, 0=none, 1=left, 2=right
 	// Width/height (CSS-level)
 	cssWidth  int // -1=not set, pixel value
 	cssHeight int // -1=not set, pixel value
@@ -213,7 +218,6 @@ func (ctx *styleContext) serialize(b *kbcBuilder) {
 		b.writeByte(cssPropFloat)
 		b.writeByte(byte(ctx.float))
 	}
-	// Border properties
 	if ctx.borderTopWidth >= 0 {
 		b.writeByte(cssPropBorderTopWidth)
 		b.writeUVL(ctx.borderTopWidth)
@@ -324,11 +328,9 @@ func parseColor(s string) (int32, bool) {
 	if s == "" {
 		return 0, false
 	}
-	// Handle transparent
 	if s == "transparent" {
 		return 0xFFFFFF, true // approximate as white
 	}
-	// Handle inherit/initial/unset
 	if s == "inherit" || s == "initial" || s == "unset" || s == "currentcolor" {
 		return 0, false
 	}
@@ -455,7 +457,6 @@ func parseHSL(args string, hasAlpha bool) (int32, bool) {
 		return 0, false
 	}
 
-	// Normalize
 	h = h / 360.0
 	for h < 0 {
 		h += 1.0
@@ -551,35 +552,28 @@ func newDefaultStyleContext() styleContext {
 }
 
 func inheritFromParent(ctx *styleContext, parent *styleContext) {
-	// color inherits
 	if !ctx.colorSet && parent.colorSet {
 		ctx.color = parent.color
 		ctx.colorSet = true
 	}
-	// font inherits
 	if ctx.fontID < 0 && parent.fontID >= 0 {
 		ctx.fontID = parent.fontID
 	}
 	// text-decoration does NOT inherit in CSS spec, but we need it for practical purposes
 	// (e.g. <a> containing <span>). Actually per spec it doesn't inherit, skip it.
 
-	// text-transform inherits
 	if ctx.textTransform < 0 && parent.textTransform >= 0 {
 		ctx.textTransform = parent.textTransform
 	}
-	// white-space inherits
 	if ctx.whiteSpace < 0 && parent.whiteSpace >= 0 {
 		ctx.whiteSpace = parent.whiteSpace
 	}
-	// line-height inherits
 	if ctx.lineHeight < 0 && parent.lineHeight >= 0 {
 		ctx.lineHeight = parent.lineHeight
 	}
-	// list-style-type inherits
 	if ctx.listStyleType < 0 && parent.listStyleType >= 0 {
 		ctx.listStyleType = parent.listStyleType
 	}
-	// text-align inherits
 	if ctx.textAlign < 0 && parent.textAlign >= 0 {
 		ctx.textAlign = parent.textAlign
 	}
@@ -619,7 +613,6 @@ func parsePx(s string) int {
 	if s == "0" {
 		return 0
 	}
-	// Try px
 	if numStr, ok := strings.CutSuffix(s, "px"); ok {
 		if v, err := strconv.Atoi(strings.TrimSpace(numStr)); err == nil {
 			return v
@@ -637,7 +630,6 @@ func parsePx(s string) int {
 			return v * 4 / 3
 		}
 	}
-	// Try bare number
 	if v, err := strconv.Atoi(s); err == nil {
 		return v
 	}
@@ -666,14 +658,13 @@ func fontSizeToFontID(value string, currentFontID int) int {
 	case "large", "larger", "x-large", "xx-large":
 		bucket = sizeLarge
 	default:
-		// Try to parse px value
 		if strings.HasSuffix(v, "px") {
 			numStr := strings.TrimSuffix(v, "px")
 			if px, err := strconv.Atoi(numStr); err == nil {
 				switch {
-				case px <= 8:
+				case px <= 11:
 					bucket = sizeSmall
-				case px <= 10:
+				case px <= 17:
 					bucket = sizeMedium
 				default:
 					bucket = sizeLarge
@@ -685,9 +676,9 @@ func fontSizeToFontID(value string, currentFontID int) int {
 				// Approximate: 1pt ≈ 1.33px
 				px := pt * 4 / 3
 				switch {
-				case px <= 8:
+				case px <= 11:
 					bucket = sizeSmall
-				case px <= 10:
+				case px <= 17:
 					bucket = sizeMedium
 				default:
 					bucket = sizeLarge
@@ -701,7 +692,6 @@ func fontSizeToFontID(value string, currentFontID int) int {
 		return currentFontID
 	}
 
-	// Determine current bold/italic state
 	isBold := currentFontID == fontBortBold9 || currentFontID == fontBortBold12 || currentFontID == fontBortBoldItalic9
 	isItalic := currentFontID == fontBortItalic9 || currentFontID == fontBortBoldItalic9
 

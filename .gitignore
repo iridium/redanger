@@ -2,3 +2,9 @@ tmp/
 references/
 server/redanger
 server/.env
+# Class of '09 port: generated game assets and fetched third-party tools stay local
+classof09/tools/unrpyc/
+classof09/out/
+classof09/app/work/
+classof09/app/assets/
+.claude/

@@ -45,7 +45,6 @@ func writeBoxTree(b *kbcBuilder, box *layoutBox) {
 	b.writeAttrLayoutXYWH(box.x, box.y, box.width, box.height)
 	b.writeAttrCSSContext(box.styleCtxIdx)
 
-	// Element-specific attributes
 	switch box.kbcTag {
 	case tagA:
 		if box.href != "" {
@@ -140,10 +139,8 @@ func writeTextBoxNode(b *kbcBuilder, box *layoutBox) {
 	// TEXT tag: no children, no attributes
 	b.writeTagOpen(tagText, false, false)
 
-	// Number of extents
 	b.writeUVL(len(box.extents))
 
-	// Build full text and track offsets
 	var fullText strings.Builder
 	offsets := make([]int, len(box.extents))
 	for i, ext := range box.extents {
@@ -158,7 +155,6 @@ func writeTextBoxNode(b *kbcBuilder, box *layoutBox) {
 		b.writeUVL(offsets[i])
 	}
 
-	// Null-terminated text content
 	b.writeNullString(fullText.String())
 }
 

@@ -53,8 +53,8 @@ func kimbaClassStr(id uint16) string {
 const userAgent = "Mozilla/5.0 (Danger hiptop 3.4; U; AvantGo 3.2)"
 
 const (
-	errorCodeFetch      = 1000 // network/fetch error
-	errorCodeBadRequest = 1001 // malformed request
+	errorCodeFetch      = 1000
+	errorCodeBadRequest = 1001
 )
 
 const httpClientTimeout = 30 * time.Second
@@ -93,7 +93,6 @@ func ListenAndServe(addr string) error {
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// Perform Danger secure handshake
 	sc, err := proto.Handshake(conn)
 	if err != nil {
 		log.Printf("Kimba: handshake failed: %v", err)
@@ -196,7 +195,6 @@ func handleFormSubmit(w io.Writer, hdr proto.Header, body []byte) {
 	formCharset, _ := br.ReadString()
 	controlCount, _ := br.ReadShort()
 
-	// Build form data
 	var formParts []string
 	for range controlCount {
 		name, _ := br.ReadString()
@@ -268,24 +266,21 @@ func proxyHTTPWithBody(w io.Writer, url, referer, method string, seqID int16, re
 				respCharset = params[8:]
 			}
 		}
-		// Strip parameters from content type
 		if base, _, ok := strings.Cut(respContentType, ";"); ok {
 			respContentType = strings.TrimSpace(base)
 		}
 	}
 
 	if strings.HasPrefix(respContentType, "text/html") {
-		// Convert HTML to KBC via headless Chrome and send as KimbaDoc.
-		kbc := chromeHTMLToKBC(url)
+		// Render the response we already have (also right for POST results).
+		kbc := htmlToKBC(resp.Request.URL.String(), respBody, resp.Header.Get("Content-Type"))
 		if kbc == nil {
-			log.Printf("Kimba: Chrome rendering failed for %s", url)
 			kbc = buildErrorKBC(url, "Failed to render page")
 		}
 		sendDocBegin(w, int32(len(kbc)), 0, seqID)
 		sendKimbaDoc(w, url, seqID, int16(resp.StatusCode), kbc)
 		sendDocEnd(w, seqID)
 	} else {
-		// Send non-HTML content as DataMessage
 		sendDocBegin(w, int32(len(respBody)), 0, seqID)
 		sendDataMessage(w, url, seqID, respContentType, respCharset, int16(resp.StatusCode), string(respBody))
 		sendDocEnd(w, seqID)

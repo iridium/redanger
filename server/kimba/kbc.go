@@ -1,5 +1,7 @@
 package kimba
 
+import "html"
+
 type bodyColors struct {
 	bgColor      int32
 	bgColorSet   bool
@@ -9,11 +11,9 @@ type bodyColors struct {
 
 func buildKBCOutput(ls *layoutState, bodyBox *layoutBox, colors bodyColors) []byte {
 	layoutBoxTree(bodyBox, screenWidth)
+	relativizeBlock(bodyBox)
 
-	totalHeight := bodyBox.height
-	if totalHeight < lineHeight {
-		totalHeight = lineHeight
-	}
+	totalHeight := max(bodyBox.height, lineHeightFor(defaultFontID))
 
 	var b kbcBuilder
 	b.writeHeader(ls.hasImages)
@@ -21,7 +21,6 @@ func buildKBCOutput(ls *layoutState, bodyBox *layoutBox, colors bodyColors) []by
 
 	var tree kbcBuilder
 
-	// DOCUMENT tag
 	tree.writeTagOpen(tagDocument, true, true)
 	if ls.title != "" {
 		tree.writeAttrString(attrDocumentTitle, ls.title)
@@ -29,7 +28,6 @@ func buildKBCOutput(ls *layoutState, bodyBox *layoutBox, colors bodyColors) []by
 	tree.writeAttrString(attrDocumentURL, ls.pageURL)
 	tree.writeAttrEnd()
 
-	// BODY tag
 	tree.writeTagOpen(tagBody, len(bodyBox.children) > 0, true)
 	tree.writeAttrLayoutXYWH(0, 0, screenWidth, totalHeight)
 	tree.writeAttrCSSContext(bodyBox.styleCtxIdx)
@@ -60,35 +58,6 @@ func buildKBCOutput(ls *layoutState, bodyBox *layoutBox, colors bodyColors) []by
 }
 
 func buildErrorKBC(pageURL, message string) []byte {
-	var styles styleContextTable
-	defaultCtx := newDefaultStyleContext()
-	defaultCtxIdx := styles.intern(defaultCtx)
-
-	var b kbcBuilder
-	b.writeHeader(false)
-	b.writeStyleContextTableChunk(&styles)
-
-	var tree kbcBuilder
-	tree.writeTagOpen(tagDocument, true, true)
-	tree.writeAttrString(attrDocumentTitle, "Error")
-	tree.writeAttrString(attrDocumentURL, pageURL)
-	tree.writeAttrEnd()
-
-	tree.writeTagOpen(tagBody, true, true)
-	tree.writeAttrLayoutXYWH(0, 0, screenWidth, lineHeight)
-	tree.writeAttrCSSContext(defaultCtxIdx)
-	tree.writeAttrEnd()
-
-	tree.writeTextNode(message, 0, 0, charsPerLine)
-
-	tree.writeEndTag() // BODY
-	tree.writeEndTag() // DOCUMENT
-
-	b.writeByte(chunkDOMTree)
-	treeBytes := tree.buf.Bytes()
-	b.writeInt32(int32(len(treeBytes)))
-	b.writeBytes(treeBytes)
-	b.writeByte(chunkEndChunk)
-
-	return b.buf.Bytes()
+	page := "<title>Error</title><p>" + html.EscapeString(message) + "</p>"
+	return htmlToKBC(pageURL, []byte(page), "text/html; charset=utf-8")
 }
